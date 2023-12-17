@@ -69,25 +69,25 @@ class RosAriaNode
 
   protected:
     ros::NodeHandle n;
-    ros::Publisher pose_pub;
-    ros::Publisher bumpers_pub;
-    ros::Publisher sonar_pub;
-    ros::Publisher sonar_pointcloud2_pub;
-    ros::Publisher voltage_pub;
+    ros::Publisher pose_pub; //nav_msgs::Odometry
+    ros::Publisher bumpers_pub; //rosaria::BumperState
+    ros::Publisher sonar_pub; //sensor_msgs::PointCloud
+    ros::Publisher sonar_pointcloud2_pub; //sensor_msgs::PointCloud2
+    ros::Publisher voltage_pub; //std_msgs::Float64
+    ros::Publisher recharge_state_pub; //std_msgs::Int8
+    ros::Publisher state_of_charge_pub; //std_msgs::Float32
+    ros::Publisher motors_state_pub; //std_msgs::Bool
 
-    ros::Publisher recharge_state_pub;
-    std_msgs::Int8 recharge_state;
+    ros::Subscriber cmdvel_sub; //geometry_msgs::Twist
 
-    ros::Publisher state_of_charge_pub;
-    ros::Publisher motors_state_pub;
-
-    ros::Subscriber cmdvel_sub;
-
+    std_msgs::Int8 recharge_state; // cache the last published value, so we can publish only on change
     std_msgs::Bool motors_state;
     bool published_motors_state;
 
     ros::ServiceServer enable_srv;
     ros::ServiceServer disable_srv;
+
+    // TODO: create service and bind cb
     bool enable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
     bool disable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
 
