@@ -52,16 +52,85 @@ class RosAriaNode : public rclcpp::Node
 public:
   RosAriaNode() : Node("ros_aria_node")
   {
-    // // Create a publisher for a std_msgs/String topic
-    // publisher_ = this->create_publisher<std_msgs::msg::String>("chatter", 10);
+    // port and baud
 
-    // // Create a timer to publish messages at a specified rate
-    // timer_ = this->create_wall_timer(
-    //   std::chrono::seconds(1), std::bind(&RosAriaNode::publishMessage, this));
+    // handle debugging more elegantly
+
+    // whether to connect to lasers using aria
+
+    // Get frame_ids to use.
+
+    // advertise services for data topics
+    // second argument to advertise() is queue size.
+    // other argmuments (optional) are callbacks, or a boolean "latch" flag (whether to send current data to new
+    // subscribers when they subscribe).
+    // See ros::NodeHandle API docs.
+    pose_pub = this->create_publisher<nav_msgs::msg::Odometry>("pose", 1000);
+    bumpers_pub = this->create_publisher<ros2aria::msg::BumperState>("bumper_state", 1000);
+    
+    sonar_pub = this->create_publisher<sensor_msgs::msg::PointCloud>("sonar", 50);
+    sonar_pointcloud2_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("sonar_pointcloud2", 50);
+    voltage_pub = this->create_publisher<std_msgs::msg::Float64>("battery_voltage", 1000);
+    recharge_state_pub = this->create_publisher<std_msgs::msg::Int8>("battery_recharge_state", 5);
+    state_of_charge_pub = this->create_publisher<std_msgs::msg::Float32>("battery_state_of_charge", 100);
+    motors_state_pub = this->create_publisher<std_msgs::msg::Bool>("motors_state", 5);
+    published_motors_state = true;
+
+    cmdvel_sub = create_subscription<geometry_msgs::msg::Twist>(
+      "cmd_vel", 1, std::bind(&RosAriaNode::cmdvel_cb, this, std::placeholders::_1));
+
+    // // advertise enable/disable services
+    // enable_srv = create_service<std_srvs::srv::Empty>(
+    //   "enable_motors", 
+    //   std::bind(&RosAriaNode::enable_srv_response, this, std::placeholders::_1, std::placeholders::_2));
+    // disable_srv = create_service<std_srvs::srv::Empty>(
+    //   "disable_motors", 
+    //   std::bind(&RosAriaNode::disable_srv_response, this, std::placeholders::_1, std::placeholders::_2));
+
+    veltime = rclcpp::Clock().now();
+  }
+
+  void cmdvel_cb(const geometry_msgs::msg::Twist::SharedPtr msg){
+    veltime = rclcpp::Clock().now();
+    RCLCPP_INFO(get_logger(), "new speed: [%0.2f,%0.2f](%0.3f)", msg->linear.x*1e3, msg->angular.z, veltime.seconds());
+
+    robot->lock();
+    robot->setVel(msg->linear.x*1e3);
+    if(robot->hasLatVel())
+      robot->setLatVel(msg->linear.y*1e3);
+    robot->setRotVel(msg->angular.z*180/M_PI);
+    robot->unlock();
+
+    RCLCPP_DEBUG(get_logger(), "RosAria: sent vels to to aria (time %f): x vel %f mm/s, y vel %f mm/s, ang vel %f deg/s", veltime.seconds(),
+      (double) msg->linear.x * 1e3, (double) msg->linear.y * 1e3, (double) msg->angular.z * 180/M_PI);
   }
 
   ~RosAriaNode() {
-    
+    // disable motors and sonar.
+    robot->disableMotors();
+    robot->disableSonar();
+
+    robot->stopRunning();
+    robot->waitForRunExit();
+    Aria::shutdown();
+  }
+
+  void sonarConnectCb()
+  {
+    publish_sonar = true;
+    publish_sonar_pointcloud2 = true;
+    robot->lock();
+    if (publish_sonar || publish_sonar_pointcloud2)
+    {
+      robot->enableSonar();
+      sonar_enabled = false;
+    }
+    else if(!publish_sonar && !publish_sonar_pointcloud2)
+    {
+      robot->disableSonar();
+      sonar_enabled = true;
+    }
+    robot->unlock();
   }
 
 private:
