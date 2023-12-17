@@ -53,12 +53,29 @@ public:
   RosAriaNode() : Node("ros_aria_node")
   {
     // port and baud
+    serial_port = this->declare_parameter("serial_port", "/dev/ttyUSB0");
+    serial_baud = this->declare_parameter("baud", 0);
 
     // handle debugging more elegantly
+    debug_aria = this->declare_parameter("debug_aria", false);
+    aria_log_filename = this->declare_parameter("aria_log_filename", "Aria.log");
 
     // whether to connect to lasers using aria
+    publish_aria_lasers = this->declare_parameter("publish_aria_lasers", false);
 
     // Get frame_ids to use.
+    frame_id_odom = this->declare_parameter("odom_frame", "odom");
+    frame_id_base_link = this->declare_parameter("base_link_frame", "base_link");
+    frame_id_bumper = this->declare_parameter("bumpers_frame", "bumpers");
+    frame_id_sonar = this->declare_parameter("sonar_frame", "sonar");
+
+    RCLCPP_WARN(this->get_logger(), "serial_port : %s", serial_port);
+    RCLCPP_WARN(this->get_logger(), "serial_baud : %d", serial_baud);
+
+    RCLCPP_WARN(this->get_logger(), "odom_frame : %s", frame_id_odom);
+    RCLCPP_WARN(this->get_logger(), "base_link_frame : %s", frame_id_base_link);
+    RCLCPP_WARN(this->get_logger(), "bumpers_frame : %s", frame_id_bumper);
+    RCLCPP_WARN(this->get_logger(), "sonar_frame : %s", frame_id_sonar);
 
     // advertise services for data topics
     // second argument to advertise() is queue size.
@@ -79,15 +96,36 @@ public:
     cmdvel_sub = create_subscription<geometry_msgs::msg::Twist>(
       "cmd_vel", 1, std::bind(&RosAriaNode::cmdvel_cb, this, std::placeholders::_1));
 
-    // // advertise enable/disable services
-    // enable_srv = create_service<std_srvs::srv::Empty>(
-    //   "enable_motors", 
-    //   std::bind(&RosAriaNode::enable_srv_response, this, std::placeholders::_1, std::placeholders::_2));
-    // disable_srv = create_service<std_srvs::srv::Empty>(
-    //   "disable_motors", 
-    //   std::bind(&RosAriaNode::disable_srv_response, this, std::placeholders::_1, std::placeholders::_2));
+    // advertise enable/disable services
+    enable_srv = create_service<std_srvs::srv::Empty>(
+      "enable_motors", 
+      std::bind(&RosAriaNode::enable_srv_response, this, std::placeholders::_1, std::placeholders::_2));
+    disable_srv = create_service<std_srvs::srv::Empty>(
+      "disable_motors", 
+      std::bind(&RosAriaNode::disable_srv_response, this, std::placeholders::_1, std::placeholders::_2));
 
     veltime = rclcpp::Clock().now();
+  }
+
+  void enable_srv_response(std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                          std::shared_ptr<std_srvs::srv::Empty::Response> response){
+    RCLCPP_INFO(this->get_logger(), "RosAria: Enable motors request.");
+    robot->lock();
+
+    if(robot->isEStopPressed())
+      RCLCPP_WARN(this->get_logger(), "RosAria: Warning: Enable motors requested, but robot also has E-Stop button pressed. Motors will not enable.");
+
+    robot->enableMotors();
+    robot->unlock();
+  }
+
+  void disable_srv_response(std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                          std::shared_ptr<std_srvs::srv::Empty::Response> response){
+
+    RCLCPP_INFO(this->get_logger(), "RosAria: Disable motors request.");
+    robot->lock();
+    robot->disableMotors();
+    robot->unlock();         
   }
 
   void cmdvel_cb(const geometry_msgs::msg::Twist::SharedPtr msg){
