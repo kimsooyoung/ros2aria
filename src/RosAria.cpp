@@ -298,6 +298,11 @@ public:
     result.reason = "success";
     for (const auto &parameter : parameters)
     {
+      // TODO list
+      // [] callback run check
+      // [] parameter type check (especially, double type)
+      // [] parameter change logic update
+
       if (parameter.get_name() == "TicksMM" &&
           parameter.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
       {
