@@ -52,6 +52,22 @@ class RosAriaNode : public rclcpp::Node
 public:
   RosAriaNode() : Node("ros_aria_node"), myPublishCB(this, &RosAriaNode::publish)
   {
+    // serial_port = "";
+    // serial_baud = 0; 
+    // conn = NULL;
+    // laserConnector = NULL;
+    // robot = NULL;
+    
+    // sonar_enabled = false;
+    // publish_sonar = false;
+    // publish_sonar_pointcloud2 = false;
+    // debug_aria = false;
+
+    // TicksMM = -1;
+    // DriftFactor = -99999;
+    // RevCount = -1;
+    // publish_aria_lasers = false;
+
     // port and baud
     serial_port = this->declare_parameter("serial_port", "/dev/ttyUSB0");
     serial_baud = this->declare_parameter("baud", 0);
@@ -105,22 +121,16 @@ public:
       std::bind(&RosAriaNode::disable_motors_cb, this, std::placeholders::_1, std::placeholders::_2));
 
     veltime = rclcpp::Clock().now();
-    
-    serial_port = "";
-    serial_baud = 0; 
-    conn = NULL;
-    laserConnector = NULL;
-    robot = NULL;
-    
-    sonar_enabled = false;
-    publish_sonar = false;
-    publish_sonar_pointcloud2 = false;
-    debug_aria = false;
+  }
 
-    TicksMM = -1;
-    DriftFactor = -99999;
-    RevCount = -1;
-    publish_aria_lasers = false;
+  ~RosAriaNode() {
+    // disable motors and sonar.
+    robot->disableMotors();
+    robot->disableSonar();
+
+    robot->stopRunning();
+    robot->waitForRunExit();
+    Aria::shutdown();
   }
 
   int Setup(){
@@ -185,54 +195,36 @@ public:
 
     // readParameters();
 
-    // Start dynamic_reconfigure server
-    // dynamic_reconfigure_server = new dynamic_reconfigure::Server<rosaria::RosAriaConfig>;
-
-    // Setup Parameter Minimums and maximums
-    // rosaria::RosAriaConfig dynConf_min;
-    // rosaria::RosAriaConfig dynConf_max;
+    // INT type params
+    TicksMM = this->declare_parameter("TicksMM", 0);
+    DriftFactor = this->declare_parameter("DriftFactor", -99999);
+    RevCount = this->declare_parameter("RevCount", 0);
     
-    // dynConf_max.trans_accel = robot->getAbsoluteMaxTransAccel() / 1000;
-    // dynConf_max.trans_decel = robot->getAbsoluteMaxTransDecel() / 1000;
-    
-    // TODO: Fix rqt dynamic_reconfigure gui to handle empty intervals
-    // Until then, set unit length interval.
-    // dynConf_max.lat_accel = ((robot->getAbsoluteMaxLatAccel() > 0.0) ? robot->getAbsoluteMaxLatAccel() : 0.1) / 1000;
-    // dynConf_max.lat_decel = ((robot->getAbsoluteMaxLatDecel() > 0.0) ? robot->getAbsoluteMaxLatDecel() : 0.1) / 1000;
-    // dynConf_max.rot_accel = robot->getAbsoluteMaxRotAccel() * M_PI/180;
-    // dynConf_max.rot_decel = robot->getAbsoluteMaxRotDecel() * M_PI/180;
+    // Double type params
+    trans_accel = this->declare_parameter("trans_accel", robot->getTransAccel() / 1000);
+    trans_decel = this->declare_parameter("trans_decel", robot->getTransDecel() / 1000);
+    lat_accel   = this->declare_parameter("lat_accel", robot->getLatAccel() / 1000);
+    lat_decel   = this->declare_parameter("lat_decel", robot->getLatDecel() / 1000);
+    rot_accel   = this->declare_parameter("rot_accel", robot->getRotAccel() * M_PI/180);
+    rot_decel   = this->declare_parameter("rot_decel", robot->getRotDecel() * M_PI/180);
 
-    // dynConf_min.trans_accel = 0;
-    // dynConf_min.trans_decel = 0;
-    // dynConf_min.lat_accel = 0;
-    // dynConf_min.lat_decel = 0;
-    // dynConf_min.rot_accel = 0;
-    // dynConf_min.rot_decel = 0;
-    
-    // dynConf_min.TicksMM     = 0;
-    // dynConf_max.TicksMM     = 200;
-    // dynConf_min.DriftFactor = -99999;
-    // dynConf_max.DriftFactor = 32767;
-    // dynConf_min.RevCount    = 0;
-    // dynConf_max.RevCount    = 65535;
+    this->set_on_parameters_set_callback(
+      std::bind(&RosAriaNode::parametersCallback, this, std::placeholders::_1)
+    );
 
-    // dynamic_reconfigure_server->setConfigMax(dynConf_max);
-    // dynamic_reconfigure_server->setConfigMin(dynConf_min);
-    
-    // rosaria::RosAriaConfig dynConf_default;
-    // dynConf_default.trans_accel = robot->getTransAccel() / 1000;
-    // dynConf_default.trans_decel = robot->getTransDecel() / 1000;
-    // dynConf_default.lat_accel   = robot->getLatAccel() / 1000;
-    // dynConf_default.lat_decel   = robot->getLatDecel() / 1000;
-    // dynConf_default.rot_accel   = robot->getRotAccel() * M_PI/180;
-    // dynConf_default.rot_decel   = robot->getRotDecel() * M_PI/180;
+    robot->lock();
+    robot->comInt(93, TicksMM);
+    robot->comInt(89, DriftFactor);
+    robot->comInt(88, RevCount);
 
-    // dynConf_default.TicksMM     = 0;
-    // dynConf_default.DriftFactor = -99999;
-    // dynConf_default.RevCount    = 0;
+    robot->setTransAccel(trans_accel * 1000);
+    robot->setTransDecel(trans_decel * 1000);
+    robot->setLatAccel(lat_accel * 1000);
+    robot->setLatDecel(lat_decel * 1000);
+    robot->setRotAccel(rot_accel * 180/M_PI);
+    robot->setRotDecel(rot_decel * 180/M_PI);
 
-    // dynamic_reconfigure_server->setConfigDefault(dynConf_default);
-    // dynamic_reconfigure_server->setCallback(boost::bind(&RosAriaNode::dynamic_reconfigureCB, this, _1, _2));
+    robot->unlock();
 
     // Enable the motors
     robot->enableMotors();
@@ -296,6 +288,81 @@ public:
 
     RCLCPP_INFO(this->get_logger(), "rosaria: Setup complete");
     return 0;
+  }
+
+  rcl_interfaces::msg::SetParametersResult parametersCallback(
+      const std::vector<rclcpp::Parameter> &parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "success";
+    for (const auto &parameter : parameters)
+    {
+      if (parameter.get_name() == "TicksMM" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
+      {
+        TicksMM = parameter.as_int();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'TicksMM' changed: %d", TicksMM);
+      }
+
+      if (parameter.get_name() == "DriftFactor" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
+      {
+        DriftFactor = parameter.as_int();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'DriftFactor' changed: %d", TicksMM);
+      }
+
+      if (parameter.get_name() == "RevCount" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
+      {
+        RevCount = parameter.as_int();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'RevCount' changed: %d", TicksMM);
+      }
+
+      if (parameter.get_name() == "trans_accel" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+      {
+        trans_accel = parameter.as_double();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'trans_accel' changed: %f", trans_accel);
+      }
+
+      if (parameter.get_name() == "trans_decel" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+      {
+        trans_decel = parameter.as_double();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'trans_decel' changed: %f", trans_accel);
+      }
+
+      if (parameter.get_name() == "lat_accel" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+      {
+        lat_accel = parameter.as_double();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'lat_accel' changed: %f", trans_accel);
+      }
+
+      if (parameter.get_name() == "lat_decel" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+      {
+        lat_decel = parameter.as_double();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'lat_decel' changed: %f", trans_accel);
+      }
+
+      if (parameter.get_name() == "rot_accel" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+      {
+        rot_accel = parameter.as_double();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'rot_accel' changed: %f", trans_accel);
+      }
+
+      if (parameter.get_name() == "rot_decel" &&
+          parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+      {
+        rot_decel = parameter.as_double();
+        RCLCPP_INFO(this->get_logger(), "Parameter 'rot_decel' changed: %f", trans_accel);
+      }
+
+    }
+    return result;
   }
 
   void publish(){
@@ -536,16 +603,6 @@ public:
       (double) msg->linear.x * 1e3, (double) msg->linear.y * 1e3, (double) msg->angular.z * 180/M_PI);
   }
 
-  ~RosAriaNode() {
-    // disable motors and sonar.
-    robot->disableMotors();
-    robot->disableSonar();
-
-    robot->stopRunning();
-    robot->waitForRunExit();
-    Aria::shutdown();
-  }
-
   void sonarConnectCb()
   {
     publish_sonar = true;
@@ -632,6 +689,11 @@ private:
 
   // whether to publish aria lasers
   bool publish_aria_lasers;
+
+  // Dynamic Reconfigure Parameters
+  double trans_accel, trans_decel;
+  double lat_accel, lat_decel;
+  double rot_accel, rot_decel;
 };
 
 int main(int argc, char *argv[])
@@ -642,6 +704,12 @@ int main(int argc, char *argv[])
 
   // Create a ROS 2 node
   auto node = std::make_shared<RosAriaNode>();
+
+  if( node->Setup() != 0 )
+  {
+    std::cout << "RosAria: ROS node setup failed..." << std::endl;
+    return -1;
+  }
 
   // Spin the node to start processing messages
   rclcpp::spin(node);
