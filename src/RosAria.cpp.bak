@@ -673,8 +673,7 @@ void RosAriaNode::publish()
     
     // publish topic(s)
 
-    if(publish_sonar_pointcloud2)
-    {
+    if(publish_sonar_pointcloud2){
       sensor_msgs::PointCloud2 cloud2;
       if(!sensor_msgs::convertPointCloudToPointCloud2(cloud, cloud2))
       {
@@ -686,8 +685,7 @@ void RosAriaNode::publish()
       }
     }
 
-    if(publish_sonar)
-    {
+    if(publish_sonar){
       sonar_pub.publish(cloud);
     }
   } // end if sonar_enabled

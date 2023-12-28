@@ -241,7 +241,7 @@ public:
     robot->disableSonar();
 
     // callback will  be called by ArRobot background processing thread for every SIP data packet received from robot
-    // robot->addSensorInterpTask("ROSPublishingTask", 100, &myPublishCB);
+    robot->addSensorInterpTask("ROSPublishingTask", 100, &myPublishCB);
 
     // Initialize bumpers with robot number of bumpers
     bumpers.front_bumpers.resize(robot->getNumFrontBumpers());
@@ -299,7 +299,9 @@ public:
   }
 
   void publish(){
-    // Note, this is called via SensorInterpTask callback (myPublishCB, named "ROSPublishingTask"). ArRobot object 'robot' sholud not be locked or unlocked.
+    // Note, this is called via SensorInterpTask callback 
+    // (myPublishCB, named "ROSPublishingTask"). 
+    // ArRobot object 'robot' sholud not be locked or unlocked.
     pos = robot->getPose();
 
     tf2::Quaternion quat;
@@ -342,6 +344,146 @@ public:
       (double)position.twist.twist.angular.z
     );
 
+    // publishing transform odom->base_link
+    odom_trans.header.stamp = rclcpp::Clock().now();
+    odom_trans.header.frame_id = frame_id_odom;
+    odom_trans.child_frame_id = frame_id_base_link;
+    
+    tf2::Quaternion quat2;
+    quat2.setRPY(0, 0, pos.getTh() * M_PI / 180);
+    odom_trans.transform.rotation.x = quat2.x();
+    odom_trans.transform.rotation.y = quat2.y();
+    odom_trans.transform.rotation.z = quat2.z();
+    odom_trans.transform.rotation.w = quat2.w();
+
+    odom_trans.transform.translation.x = pos.getX()/1000;
+    odom_trans.transform.translation.y = pos.getY()/1000;
+    odom_trans.transform.translation.z = 0.0;
+    
+    odom_broadcaster->sendTransform(odom_trans);
+    
+    // getStallValue returns 2 bytes with stall bit and bumper bits, packed as (00 00 FrontBumpers RearBumpers)
+    int stall = robot->getStallValue();
+    unsigned char front_bumpers = (unsigned char)(stall >> 8);
+    unsigned char rear_bumpers = (unsigned char)(stall);
+
+    bumpers.header.frame_id = frame_id_bumper;
+    bumpers.header.stamp = rclcpp::Clock().now();
+
+    std::stringstream bumper_info(std::stringstream::out);
+    // Bit 0 is for stall, next bits are for bumpers (leftmost is LSB)
+    for (unsigned int i=0; i<robot->getNumFrontBumpers(); i++)
+    {
+      bumpers.front_bumpers[i] = (front_bumpers & (1 << (i+1))) == 0 ? 0 : 1;
+      bumper_info << " " << (front_bumpers & (1 << (i+1)));
+    }
+    RCLCPP_DEBUG(this->get_logger(), "RosAria: Front bumpers:%s", bumper_info.str().c_str());
+    bumper_info.str("");
+
+    // Rear bumpers have reverse order (rightmost is LSB)
+    unsigned int numRearBumpers = robot->getNumRearBumpers();
+    for (unsigned int i=0; i<numRearBumpers; i++)
+    {
+      bumpers.rear_bumpers[i] = (rear_bumpers & (1 << (numRearBumpers-i))) == 0 ? 0 : 1;
+      bumper_info << " " << (rear_bumpers & (1 << (numRearBumpers-i)));
+    }
+    RCLCPP_DEBUG(this->get_logger(), "RosAria: Rear bumpers:%s", bumper_info.str().c_str());
+    
+    bumpers_pub->publish(bumpers);
+
+    //Publish battery information
+    // TODO: Decide if BatteryVoltageNow (normalized to (0,12)V)  is a better option
+    std_msgs::msg::Float64 batteryVoltage;
+    batteryVoltage.data = robot->getRealBatteryVoltageNow();
+    voltage_pub->publish(batteryVoltage);
+
+    if(robot->haveStateOfCharge())
+    {
+      std_msgs::msg::Float32 soc;
+      soc.data = robot->getStateOfCharge()/100.0;
+      state_of_charge_pub->publish(soc);
+    }
+
+    // publish recharge state if changed
+    char s = robot->getChargeState();
+    if(s != recharge_state.data)
+    {
+      RCLCPP_INFO(this->get_logger(), "RosAria: publishing new recharge state %d.", s);
+      recharge_state.data = s;
+      recharge_state_pub->publish(recharge_state);
+    }
+
+    // publish motors state if changed
+    bool e = robot->areMotorsEnabled();
+    if(e != motors_state.data || !published_motors_state)
+    {
+      RCLCPP_INFO(this->get_logger(), "RosAria: publishing new motors state %d.", e);
+      motors_state.data = e;
+      motors_state_pub->publish(motors_state);
+      published_motors_state = true;
+    }
+
+    // Publish sonar information, if enabled.
+    if (publish_sonar || publish_sonar_pointcloud2)
+    {
+      sensor_msgs::msg::PointCloud cloud;	//sonar readings.
+      cloud.header.stamp = position.header.stamp;	//copy time.
+      // sonar sensors relative to base_link
+      cloud.header.frame_id = frame_id_sonar;
+
+      std::stringstream sonar_debug_info; // Log debugging info
+      sonar_debug_info << "Sonar readings: ";
+
+      for (int i = 0; i < robot->getNumSonar(); i++) {
+        ArSensorReading* reading = NULL;
+        reading = robot->getSonarReading(i);
+        if(!reading) {
+          RCLCPP_WARN(this->get_logger(), "RosAria: Did not receive a sonar reading.");
+          continue;
+        }
+      
+        // getRange() will return an integer between 0 and 5000 (5m)
+        sonar_debug_info << reading->getRange() << " ";
+
+        // local (x,y). Appears to be from the centre of the robot, since values may
+        // exceed 5000. This is good, since it means we only need 1 transform.
+        // x & y seem to be swapped though, i.e. if the robot is driving north
+        // x is north/south and y is east/west.
+        //
+        //ArPose sensor = reading->getSensorPosition();  //position of sensor.
+        // sonar_debug_info << "(" << reading->getLocalX() 
+        //                  << ", " << reading->getLocalY()
+        //                  << ") from (" << sensor.getX() << ", " 
+        //                  << sensor.getY() << ") ;; " ;
+      
+        //add sonar readings (robot-local coordinate frame) to cloud
+        geometry_msgs::msg::Point32 p;
+        p.x = reading->getLocalX() / 1000.0;
+        p.y = reading->getLocalY() / 1000.0;
+        p.z = 0.0;
+        cloud.points.push_back(p);
+      }
+      RCLCPP_DEBUG_STREAM(this->get_logger(), sonar_debug_info.str());
+      
+      // publish topic(s)
+      if(publish_sonar_pointcloud2)
+      {
+        sensor_msgs::msg::PointCloud2 cloud2;
+        if(!sensor_msgs::convertPointCloudToPointCloud2(cloud, cloud2))
+        {
+          RCLCPP_WARN(this->get_logger(), "Error converting sonar point cloud message to point_cloud2 type before publishing! Not publishing this time.");
+        }
+        else
+        {
+          sonar_pointcloud2_pub->publish(cloud2);
+        }
+      }
+
+      if(publish_sonar)
+      {
+        sonar_pub->publish(cloud);
+      }
+    } // end if sonar_enabled
   }
 
   void cmdvel_watchdog(){
@@ -423,16 +565,6 @@ public:
   }
 
 private:
-  void publishMessage()
-  {
-    // Create a message
-    auto message = std_msgs::msg::String();
-    message.data = "Hello, ROS 2!";
-
-    // Publish the message
-    publisher_->publish(message);
-  }
-
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
 
   // Publishers
