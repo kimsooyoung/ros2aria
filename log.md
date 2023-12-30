@@ -72,3 +72,12 @@ private:
     std::string my_str_;
 };
 ```
+
+cbp rosaria_msgs && source install/local_setup.bash
+
+ros2 interface show rosaria_msgs/msg/BumperState 
+std_msgs/Header header
+bool[] front_bumpers
+bool[] rear_bumpers
+
+cbp rosaria
