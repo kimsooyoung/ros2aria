@@ -73,11 +73,11 @@ private:
 };
 ```
 
-cbp rosaria_msgs && source install/local_setup.bash
+colcon build --symlink-install --packages-select rosaria_msgs && source install/local_setup.bash
 
 ros2 interface show rosaria_msgs/msg/BumperState 
 std_msgs/Header header
 bool[] front_bumpers
 bool[] rear_bumpers
 
-cbp rosaria
+colcon build --symlink-install --packages-select rosaria
