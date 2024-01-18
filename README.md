@@ -51,4 +51,4 @@ $ sudo chmod 777 /dev/ttyUSB0
 $ ros2 run rosaria RosAria
 ```
 
-[] ubuntu 22.04 check and create humble branch
+[x] ubuntu 22.04 check and create humble branch => check humble branch plz 
