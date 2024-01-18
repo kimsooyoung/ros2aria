@@ -208,9 +208,12 @@ public:
     rot_accel   = this->declare_parameter("rot_accel", robot->getRotAccel() * M_PI/180);
     rot_decel   = this->declare_parameter("rot_decel", robot->getRotDecel() * M_PI/180);
 
-    this->set_on_parameters_set_callback(
-      std::bind(&RosAriaNode::parametersCallback, this, std::placeholders::_1)
-    );
+    // TODO
+    // Instead, use the rclcpp::Node methods add_on_set_parameters_callback and 
+    // remove_on_set_parameters_callback for adding and removing functions that are called when parameters are set.
+    // this->set_on_parameters_set_callback(
+    //   std::bind(&RosAriaNode::parametersCallback, this, std::placeholders::_1)
+    // );
 
     robot->lock();
     robot->comInt(93, TicksMM);
